@@ -310,11 +310,102 @@ def build_report(canvas, course_id, assignment_id, header_list, submissions, rub
 
     return fpath
 
+def grader_analysis(df, fpath, label='score'):
+    # Convert 'score' column to numeric type
+    df[label] = pd.to_numeric(df[label], errors='coerce')
+
+    df = df[df[label]>0]
+       
+    # Grader analysis
+    global_median = df[label].median()
+    global_mean = df[label].mean() 
+
+    # Perform analysis for each grader
+    results = []
+    for grader in df['grader'].unique():
+        try:
+            print(grader)
+            grader_scores = df[df['grader'] == grader][label]
+            median_score = grader_scores.median()
+            mean_score = grader_scores.mean()
+            other_scores = df[df['grader'] != grader][label]
+            print("grader_scores", grader_scores)
+            print("other_scores", other_scores)
+            U_stat, p_value = stats.mannwhitneyu(grader_scores, other_scores, alternative='two-sided')
+            results.append({'Grader': grader, f'Median {label}': median_score, f'Mean {label}': mean_score, 'P-Value': p_value})
+        except:
+            continue
+
+
+    results_df = pd.DataFrame(results)
+    results_df.sort_values(f'Median {label}', inplace=True)
+
+    # Create the horizontal boxplot
+    plt.figure(figsize=(10, 15))
+    box_plot = sns.boxplot(x=label, y='grader', data=df, order=results_df['Grader'], orient='h')
+
+    # Update axis labels
+    plt.xlabel(label)
+    plt.ylabel('Grader')
+
+    # Overlay the strip plot to show individual scores
+    sns.stripplot(x=label, y='grader', data=df, order=results_df['Grader'], color='red', size=5, jitter=True, orient='h', alpha=0.5)
+
+    # Add a vertical line for the global median score
+    plt.axvline(x=global_median, color='green')
+
+    # Annotate significant differences
+    for i, grader in enumerate(results_df['Grader']):
+        if results_df[results_df['Grader'] == grader]['P-Value'].values[0] < 0.05:
+            plt.text(x=df[label].max() + 1, y=i+0.3, s=f"*", fontsize=20, color='red', verticalalignment='center')
+
+
+
+    plt.tight_layout()
+    
+
+    # save the plot
+    box_plot.figure.savefig(fpath.replace("moderation_report.xlsx", f"{label}_boxplot.png"))
+
+    # Get graders with significant differences
+    significant_graders = results_df[results_df['P-Value'] < 0.05]['Grader'].values
+
+    return results_df, significant_graders
+
+def count_total_words(df):
+    # If annotations column exists, count the total number of words in the annotations
+    if 'annotations' in df.columns:
+        df['total_annotations_words'] = df['annotations'].str.split().str.len()
+    else:
+        df['total_annotations_words'] = 0
+    
+
+    if 'comments' in df.columns:
+        df['total_comments_words'] = df['comments'].str.split().str.len()
+    else:
+        df['total_comments_words'] = 0
+
+    df['total_words'] = df['total_annotations_words'] + df['total_comments_words']
+
+    return df
+
 def moderate(fpath, anonymise_graders=False, generate_summary=False):
     df = pd.read_excel(fpath)
 
-    if anonymise_graders:
+    # Add column "moderate_reason" to df. Default is empty string
+    df['moderation_issue'] = ''
+    df['rubric_score_diff'] = 0
 
+    # Only keep "graded" and nonzero scores
+    df = df[df['status'] == 'graded']
+    df = df[df['score'] > 0]
+
+    global_median = df['score'].median()
+    global_mean = df['score'].mean()
+
+    df = count_total_words(df)
+
+    if anonymise_graders:
 
         # Randomise df
         df = df.sample(frac=1)
@@ -328,72 +419,20 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
         # Replace grader names with hash
         df['grader'] = df['grader'].map(grader_hash)
 
-    # Convert 'score' column to numeric type
-    df['score'] = pd.to_numeric(df['score'], errors='coerce')
-
-    # Add column "moderate_reason" to df. Default is empty string
-    df['moderation_issue'] = ''
-    df['rubric_score_diff'] = 0
-
-    # Only keep "graded"
-    df = df[df['status'] == 'graded']
-
-    df = df[df['score'] > 0]
-
-    # Grader analysis
-    global_median = df['score'].median()
-    global_mean = df['score'].mean()
-
-    # Perform analysis for each grader
-    results = []
-    for grader in df['grader'].unique():
-        grader_scores = df[df['grader'] == grader]['score']
-        median_score = grader_scores.median()
-        mean_score = grader_scores.mean()
-        other_scores = df[df['grader'] != grader]['score']
-        U_stat, p_value = stats.mannwhitneyu(grader_scores, other_scores, alternative='two-sided')
-        results.append({'Grader': grader, 'Median Score': median_score, 'Mean Score': mean_score, 'P-Value': p_value})
-
-    results_df = pd.DataFrame(results)
-    results_df.sort_values('Median Score', inplace=True)
-
-    # Create the horizontal boxplot
-    plt.figure(figsize=(10, 15))
-    box_plot = sns.boxplot(x='score', y='grader', data=df, order=results_df['Grader'], orient='h')
-
-    # Update axis labels
-    plt.xlabel('Score')
-    plt.ylabel('Grader')
-
-    # Overlay the strip plot to show individual scores
-    sns.stripplot(x='score', y='grader', data=df, order=results_df['Grader'], color='red', size=5, jitter=True, orient='h', alpha=0.5)
-
-    # Add a vertical line for the global median score
-    plt.axvline(x=global_median, color='green')
-
-    # Annotate significant differences
-    for i, grader in enumerate(results_df['Grader']):
-        if results_df[results_df['Grader'] == grader]['P-Value'].values[0] < 0.05:
-            plt.text(x=df['score'].max() + 1, y=i+0.3, s=f"*", fontsize=20, color='red', verticalalignment='center')
-
-
-
-    plt.tight_layout()
-    
-
-    # save the plot
-    box_plot.figure.savefig(fpath.replace("moderation_report.xlsx", "boxplot.png"))
-
-    # Get graders with significant differences
-    significant_graders = results_df[results_df['P-Value'] < 0.05]['Grader'].values
+    results_df, significant_graders = grader_analysis(df, fpath, label='score')
 
     # For each grader, if their median score is significantly different to the global median, set moderate to True and moderate_reason to "Grader median score is significantly different to global median"
     for grader in significant_graders:
-        median_score = results_df[results_df['Grader'] == grader]['Median Score'].values[0]
+        median_score = results_df[results_df['Grader'] == grader]['Median score'].values[0]
         if median_score > global_median:
             df.loc[df['grader'] == grader, 'moderation_issue'] += f"Grader median score is significantly higher than global median, "
         else:
             df.loc[df['grader'] == grader, 'moderation_issue'] += f"Grader median score is significantly lower than global median, "
+
+    if 'total_words' in df.columns:
+        words_df, significant_graders_words = grader_analysis(df, fpath, label='total_words')
+
+    print(significant_graders_words)
 
 
     # for all df, total values for each row in columns containing word "SCORE". 
