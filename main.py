@@ -197,7 +197,10 @@ def get_rubric_score(rubric, rubric_assessment):
             if ratings["id"] == rating_id:
                     ratings_list.append(ratings["points"])
         if rating_id is None:
-            ratings_list.append(rubric_assessment[item["id"]]["points"])    
+            try:
+                ratings_list.append(rubric_assessment[item["id"]]["points"])
+            except:
+                ratings_list.append("")   
         
     return ratings_list
 
