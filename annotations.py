@@ -22,7 +22,7 @@ def get_annotations(session, url):
         try:
             session.browser.switch_to.frame('speedgrader_iframe')
 
-            time.sleep(5)
+            time.sleep(15)
 
             annotations = []
 

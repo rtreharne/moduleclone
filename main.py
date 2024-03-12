@@ -196,6 +196,8 @@ def get_rubric_score(rubric, rubric_assessment):
         for ratings in item["ratings"]:
             if ratings["id"] == rating_id:
                     ratings_list.append(ratings["points"])
+        if rating_id is None:
+            ratings_list.append(rubric_assessment[item["id"]]["points"])    
         
     return ratings_list
 
@@ -314,7 +316,7 @@ def grader_analysis(df, fpath, label='score'):
     # Convert 'score' column to numeric type
     df[label] = pd.to_numeric(df[label], errors='coerce')
 
-    df = df[df[label]>0]
+    df = df[df[label].notnull()]
        
     # Grader analysis
     global_median = df[label].median()
@@ -324,13 +326,12 @@ def grader_analysis(df, fpath, label='score'):
     results = []
     for grader in df['grader'].unique():
         try:
-            print(grader)
+   
             grader_scores = df[df['grader'] == grader][label]
             median_score = grader_scores.median()
             mean_score = grader_scores.mean()
             other_scores = df[df['grader'] != grader][label]
-            print("grader_scores", grader_scores)
-            print("other_scores", other_scores)
+   
             U_stat, p_value = stats.mannwhitneyu(grader_scores, other_scores, alternative='two-sided')
             results.append({'Grader': grader, f'Median {label}': median_score, f'Mean {label}': mean_score, 'P-Value': p_value})
         except:
@@ -344,6 +345,9 @@ def grader_analysis(df, fpath, label='score'):
     plt.figure(figsize=(10, 15))
     box_plot = sns.boxplot(x=label, y='grader', data=df, order=results_df['Grader'], orient='h')
 
+    # add light grey vertical gridlines to the boxplot
+    plt.grid(axis='x', linestyle='--', alpha=0.5)
+
     # Update axis labels
     plt.xlabel(label)
     plt.ylabel('Grader')
@@ -356,8 +360,11 @@ def grader_analysis(df, fpath, label='score'):
 
     # Annotate significant differences
     for i, grader in enumerate(results_df['Grader']):
-        if results_df[results_df['Grader'] == grader]['P-Value'].values[0] < 0.05:
-            plt.text(x=df[label].max() + 1, y=i+0.3, s=f"*", fontsize=20, color='red', verticalalignment='center')
+        try:
+            if results_df[results_df['Grader'] == grader]['P-Value'].values[0] < 0.05:
+                plt.text(x=df[label].max() + 1, y=i+0.3, s=f"*", fontsize=20, color='red', verticalalignment='center')
+        except:
+            continue
 
 
 
@@ -374,6 +381,7 @@ def grader_analysis(df, fpath, label='score'):
 
 def count_total_words(df):
     # If annotations column exists, count the total number of words in the annotations
+    
     if 'annotations' in df.columns:
         df['total_annotations_words'] = df['annotations'].str.split().str.len()
     else:
@@ -385,6 +393,13 @@ def count_total_words(df):
     else:
         df['total_comments_words'] = 0
 
+    # replace total_annotations_words nan with zero and make integer
+    df['total_annotations_words'] = df['total_annotations_words'].fillna(0).astype(int)
+
+    # replace total_comments_words nan with zero and make integer
+    df['total_comments_words'] = df['total_comments_words'].fillna(0).astype(int)
+
+    # Add total_words column
     df['total_words'] = df['total_annotations_words'] + df['total_comments_words']
 
     return df
@@ -430,9 +445,16 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
             df.loc[df['grader'] == grader, 'moderation_issue'] += f"Grader median score is significantly lower than global median, "
 
     if 'total_words' in df.columns:
+
+        df['total_words'] = df['total_annotations_words'] + df['total_comments_words']
         words_df, significant_graders_words = grader_analysis(df, fpath, label='total_words')
 
-    print(significant_graders_words)
+    for grader in significant_graders_words:
+        median_score = words_df[results_df['Grader'] == grader]['Median total_words'].values[0]
+        if median_score > df['total_words'].median():
+            df.loc[df['grader'] == grader, 'moderation_issue'] += f"Grader median feedback word count is significantly higher than global median, "
+        else:
+            df.loc[df['grader'] == grader, 'moderation_issue'] += f"Grader median feedback word count is significantly lower than global median, "
 
 
     # for all df, total values for each row in columns containing word "SCORE". 
@@ -441,6 +463,9 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
     df.loc[df.filter(like='SCORE').sum(axis=1) != df['score'], 'moderation_issue'] += "Final score is different to rubric total, "
 
     df.loc[df.filter(like='SCORE').sum(axis=1) != df['score'], 'rubric_score_diff'] = df.filter(like='SCORE').sum(axis=1) - df['score']
+
+    # Identify no written feedback
+    df.loc[df['total_words'] == 0, 'moderation_issue'] += "No written feedback, "
 
     df.to_excel(fpath, index=False)
     print(f"Moderated report saved as {fpath}")
@@ -454,18 +479,92 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
         # Add credit
         doc.add_paragraph("This moderation summary was generated using the Canvas Assignment Auto Moderator by R. Treharne. For more information, contact R.Treharne@liverpool.ac.uk")
 
+        # Table header
+        doc.add_paragraph("Table 1: Score ranges and counts")
+        # Create a table to display the score ranges and counts
+        table = doc.add_table(rows=10, cols=2)
+        table.style = 'Table Grid'
+
+        # Add the headers
+        table.cell(0, 0).text = 'Score Range'
+        table.cell(0, 1).text = 'Submissions'
+
+        # Add the score ranges and counts to the table
+        table.cell(1, 0).text = 'Fail (<40)'
+        table.cell(1, 1).text = str(len(df[df['score'] < 40]))
+
+        table.cell(2, 0).text = 'Borderline fail (38 - 40)'
+        table.cell(2, 1).text = str(len(df[(df['score'] >= 38) & (df['score'] < 40)]))
+
+        table.cell(3, 0).text = 'Pass (40 - 50)'
+        table.cell(3, 1).text = str(len(df[(df['score'] >= 40) & (df['score'] < 50)]))
+
+        table.cell(4, 0).text = 'Borderline pass/2.2 (48 - 50)'
+        table.cell(4, 1).text = str(len(df[(df['score'] >= 48) & (df['score'] < 50)]))
+
+        table.cell(5, 0).text = '2.2 (50 - 60)'
+        table.cell(5, 1).text = str(len(df[(df['score'] >= 50) & (df['score'] < 60)]))
+
+        table.cell(6, 0).text = 'Borderline 2.2/2.1 (58 - 60)'
+        table.cell(6, 1).text = str(len(df[(df['score'] >= 58) & (df['score'] < 60)]))
+
+        table.cell(7, 0).text = '2.1 (60 - 70)'
+        table.cell(7, 1).text = str(len(df[(df['score'] >= 60) & (df['score'] < 70)]))
+
+        table.cell(8, 0).text = 'Borderline 2.1/1st (68 - 70)'
+        table.cell(8, 1).text = str(len(df[(df['score'] >= 68) & (df['score'] < 70)]))
+
+        table.cell(9, 0).text = '1st (70 - 100)'
+        table.cell(9, 1).text = str(len(df[(df['score'] >= 70) & (df['score'] <= 100)]))
+
+        # Table header
+        doc.add_paragraph("Table 2: Summary of Moderation issues")
+
+        # Create a table to display the moderation issues
+        table = doc.add_table(rows=8, cols=2)
+        table.style = 'Table Grid'
+
+        # Add the headers
+        table.cell(0, 0).text = 'Moderation Issue'
+        table.cell(0, 1).text = 'Submissions Impacted'
+
+        # Add the moderation issues and counts to the table
+        table.cell(1, 0).text = 'Grader median score is significantly lower than global median score'
+        table.cell(1, 1).text = str(len(df[df['moderation_issue'].str.contains("Grader median score is significantly lower")]))
+
+        table.cell(2, 0).text = 'Grader median score is significantly higher than global median score'
+        table.cell(2, 1).text = str(len(df[df['moderation_issue'].str.contains("Grader median score is significantly higher")]))
+
+        table.cell(3, 0).text = 'Grader median feedback word count is significantly lower than global median word count'
+        table.cell(3, 1).text = str(len(df[df['moderation_issue'].str.contains("Grader median feedback word count is significantly lower")]))
+
+        table.cell(4, 0).text = 'Grader median feedback word count is significantly higher than global median word count'
+        table.cell(4, 1).text = str(len(df[df['moderation_issue'].str.contains("Grader median feedback word count is significantly higher")]))
+
+        table.cell(5, 0).text = 'Final score is different to rubric total'
+        table.cell(5, 1).text = str(len(df[df['moderation_issue'].str.contains("Final score is different to rubric total")]))
+
+        table.cell(6, 0).text = 'No written feedback'
+        table.cell(6, 1).text = str(len(df[df['moderation_issue'].str.contains("No written feedback")]))
+
+        table.cell(7, 0).text = 'Total'
+        # total number of columns where lenth of "moderation_issue" is more than 5 (i.e. not empty)
+        table.cell(7, 1).text = str(len(df[df['moderation_issue'].str.len() > 5]))
+
+
+
         # Add the boxplot
-        doc.add_picture(fpath.replace("moderation_report.xlsx", "boxplot.png"), width=Inches(5))
+        doc.add_picture(fpath.replace("moderation_report.xlsx", "score_boxplot.png"), width=Inches(5))
 
         # Add figure caption
-        doc.add_paragraph('Figure 1: Boxplot of scores by grader. Red dots indicate individual scores. Green line indicates the global median score. * indicates significant differences between grader median scores and the global median score.')
+        doc.add_paragraph(f'Figure 1: Boxplot of scores by grader. Red dots indicate individual scores. Green line indicates the global median score. * indicates significant differences between grader median scores and the global median score ({df["score"].median()}).')
 
         # get graders with P-Value < 0.05
         significant_graders = results_df[results_df["P-Value"] < 0.05]
 
         # Format median and mean values to 2 decimal places
-        significant_graders["Median Score"] = significant_graders["Median Score"].map("{:.2f}".format)
-        significant_graders["Mean Score"] = significant_graders["Mean Score"].map("{:.2f}".format)
+        significant_graders["Median score"] = significant_graders["Median score"].map("{:.2f}".format)
+        significant_graders["Mean score"] = significant_graders["Mean score"].map("{:.2f}".format)
 
         # Format P-Value to scientific notation
         significant_graders["P-Value"] = significant_graders["P-Value"].map(lambda x: f"{x:.2e}")
@@ -474,7 +573,7 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
         doc.add_page_break()
 
         # Add table title
-        doc.add_paragraph('Table 1: Graders with significant differences in median scores compared to the global median score.')
+        doc.add_paragraph(f'Table 2: Graders with significant differences in median scores compared to the global median score ({df['score'].median()}).')
 
         # Add significatn_graders dataframe as table to document
         t = doc.add_table(significant_graders.shape[0]+1, significant_graders.shape[1])
@@ -487,6 +586,47 @@ def moderate(fpath, anonymise_graders=False, generate_summary=False):
         for i in range(significant_graders.shape[0]):
             for j in range(significant_graders.shape[-1]):
                 t.cell(i+1,j).text = str(significant_graders.values[i,j])
+
+        # Start a new page
+        doc.add_page_break()
+
+        # Add the boxplot
+        doc.add_picture(fpath.replace("moderation_report.xlsx", "total_words_boxplot.png"), width=Inches(5))
+
+        # Add figure caption
+        doc.add_paragraph(f'Figure 2: Boxplot of total words (annotations + comments) by grader. Red dots indicate individual word counts (for single submission). Green line indicates the global median word count. * indicates significant differences between grader median word counts and the global median word count ({df['total_words'].median()}).')
+
+        # get graders with P-Value < 0.05
+        significant_graders_words = words_df[words_df["P-Value"] < 0.05]
+
+        # Format median and mean values to 2 decimal places
+        significant_graders_words["Median total_words"] = significant_graders_words["Median total_words"].map("{:.2f}".format)
+        significant_graders_words["Mean total_words"] = significant_graders_words["Mean total_words"].map("{:.2f}".format)
+        
+        # Format P-Value to scientific notation
+        significant_graders_words["P-Value"] = significant_graders_words["P-Value"].map(lambda x: f"{x:.2e}")
+
+        # Start a new page
+        doc.add_page_break()
+
+        # Add table title
+        doc.add_paragraph(f'Table 3: Graders with significant differences in median word counts compared to the global median word count ({df['total_words'].median()}).')
+
+        # Add significatn_graders dataframe as table to document
+        t = doc.add_table(significant_graders_words.shape[0]+1, significant_graders_words.shape[1])
+
+        # add the header rows.
+        for j in range(significant_graders_words.shape[-1]):
+            t.cell(0,j).text = significant_graders_words.columns[j]
+
+        # add the rest of the data frame
+            
+        for i in range(significant_graders_words.shape[0]):
+
+            for j in range(significant_graders_words.shape[-1]):
+                t.cell(i+1,j).text = str(significant_graders_words.values[i,j])
+
+        
 
         # Save the document
         doc.save(fpath.replace("moderation_report.xlsx", "moderation_summary.docx"))
