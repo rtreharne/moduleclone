@@ -65,16 +65,6 @@ https://community.canvaslms.com/t5/Admin-Guide/How-do-I-manage-API-access-tokens
 
 ### Step 5. Run `main.py`
 
-Run the following command:
-
-```{bash}
-python3 main.py
-```
-
-Follow the prompts. If successfull your report (an timestamped Excel file) will appear in your current working directory.
-
-Run the `main.py` script and follow prompts.
-
 ```{bash}
 python main.py
 ```
