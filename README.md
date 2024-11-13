@@ -1,6 +1,6 @@
 # AutoModerator
 
-Author: Dr. Robert Treharne, School of Life Sciences, University of Liverpool
+Author: Dr. Robert Treharne, School of Biosciences, University of Liverpool
 
 Version: V1.0
 
@@ -14,6 +14,10 @@ This tool will:
 
 ## Usage
 
+You will need Python 3 installed on your system in order to perform the following steps.
+
+If you are using Windows then it is recommended that you also install Git Bash to run the bash commands below.
+
 ### Step 1. Clone this repository
 
 ```{bash}
@@ -21,7 +25,7 @@ git clone https://github.com/rtreharne/moduleclone
 cd moduleclone
 ```
 
-### Step 3. Install requirements
+### Step 2. Install requirements
 
 Create a virtual environment and install requirements
 ```{bash}
@@ -35,7 +39,7 @@ If you don't want to create a virtual environment
 pip install -r requirements.txt
 ```
 
-### Step 4. Create a `config.py` file (Optional)
+### Step 3. Create a `config.py` file (Optional)
 
 If you're going to be running lots of reports it might be useful to create a `config.py` file containing your `CANVAS_URL` and `CANVAS_TOKEN`.
 
@@ -49,6 +53,10 @@ nano config.py
 Update the `CANVAS_URL` and `CANVAS_TOKEN` variables. To create a new token, follow the guidance at:
 
 https://community.canvaslms.com/t5/Admin-Guide/How-do-I-manage-API-access-tokens-as-an-admin/ta-p/89
+
+### Step 4. Update `courses.csv` file
+
+Using the `courses.csv` file as a template add the Canvas course_id and course_sis_id for each Canvas course that you wish to clone a module into.
 
 ### Step 5. Run `main.py`
 
