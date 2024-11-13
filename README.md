@@ -1,4 +1,4 @@
-# AutoModerator
+# CanvasModuleCloner
 
 Author: Dr. Robert Treharne, School of Biosciences, University of Liverpool
 
@@ -9,7 +9,10 @@ https://www.canvaswizards.org.uk
 This tool will:
 
 + Clone a module from a Canvas course into other courses
-+ Identify published status and contents of existing modules
++ Update position of modules in courses*
++ Identify published status and contents of existing modules*
+
+*Functionality pending.
 
 
 ## Usage
